@@ -12,6 +12,7 @@
     "@google/genai": "^2.14.0",
     "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.111.0",
+    "date-fns": "^4.4.0",
     "date-fns-tz": "^3.2.0",
     "katex": "^0.18.1",
     "next": "^15.1.0",

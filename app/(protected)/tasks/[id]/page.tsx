@@ -3,8 +3,9 @@ import { notFound } from "next/navigation";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/server";
 import { APP_TIMEZONE } from "@/lib/config";
-import { DIFFICULTY_LABELS, type Difficulty } from "@/lib/curriculum";
+import type { Difficulty } from "@/lib/curriculum";
 import { MathText } from "@/lib/components/MathText";
+import { DifficultyStars } from "@/lib/components/DifficultyStars";
 import { retryGrading } from "./actions";
 import { AnswerForm } from "./AnswerForm";
 
@@ -43,13 +44,26 @@ export default async function TaskDetailPage({
   const { id } = await params;
   const supabase = await createClient();
 
-  const { data: taskData } = await supabase
-    .from("daily_tasks")
-    .select(
-      "id, task_date, subject, difficulty, problem_type, problem_statement, choices, estimated_minutes, unit:curriculum_units(name_ja)",
-    )
-    .eq("id", id)
-    .maybeSingle();
+  // 2クエリはお互いに依存しないため並列実行する（レイテンシ削減）。
+  const [{ data: taskData }, { data: submissionData }] = await Promise.all([
+    supabase
+      .from("daily_tasks")
+      .select(
+        "id, task_date, subject, difficulty, problem_type, problem_statement, choices, estimated_minutes, unit:curriculum_units(name_ja)",
+      )
+      .eq("id", id)
+      .maybeSingle(),
+    supabase
+      .from("submissions")
+      .select(
+        "id, answer_text, reviews(is_correct, score, feedback, strengths, improvement_points, corrected_answer)",
+      )
+      .eq("task_id", id)
+      .order("submitted_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+
   if (!taskData) {
     notFound();
   }
@@ -57,16 +71,6 @@ export default async function TaskDetailPage({
   const unit = Array.isArray(task.unit) ? task.unit[0] : task.unit;
   const today = formatInTimeZone(new Date(), APP_TIMEZONE, "yyyy-MM-dd");
   const isToday = task.task_date === today;
-
-  const { data: submissionData } = await supabase
-    .from("submissions")
-    .select(
-      "id, answer_text, reviews(is_correct, score, feedback, strengths, improvement_points, corrected_answer)",
-    )
-    .eq("task_id", id)
-    .order("submitted_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
   const submission = submissionData as unknown as SubmissionDetail | null;
   const review = submission
     ? Array.isArray(submission.reviews)
@@ -77,13 +81,13 @@ export default async function TaskDetailPage({
   return (
     <main className="mx-auto max-w-2xl px-4 py-10">
       <Link href="/dashboard" className="text-sm text-blue-600 underline">
-        ← ダッシュボードに戻る
+        ← ホームに戻る
       </Link>
       <h1 className="mt-4 text-xl font-semibold">
         {task.subject === "math" ? "数学" : "英語"}・{unit?.name_ja ?? "不明"}
       </h1>
       <p className="mt-1 text-sm text-gray-500">
-        難易度: {DIFFICULTY_LABELS[task.difficulty as Difficulty]}
+        難易度: <DifficultyStars difficulty={task.difficulty as Difficulty} />
         {task.estimated_minutes ? `・目安 ${task.estimated_minutes}分` : ""}
       </p>
 
