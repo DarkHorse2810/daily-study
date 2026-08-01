@@ -1,0 +1,12 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+@import "katex/dist/katex.min.css";
+
+/* MathTextコンポーネント（react-markdown出力）の最低限のスペーシング */
+.math-text p {
+  margin-bottom: 0.75rem;
+}
+.math-text p:last-child {
+  margin-bottom: 0;
+}
