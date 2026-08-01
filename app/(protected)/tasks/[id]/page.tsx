@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/server";
+import { APP_TIMEZONE } from "@/lib/config";
 import { DIFFICULTY_LABELS, type Difficulty } from "@/lib/curriculum";
 import { MathText } from "@/lib/components/MathText";
 import { retryGrading } from "./actions";
@@ -8,6 +10,7 @@ import { AnswerForm } from "./AnswerForm";
 
 interface TaskDetail {
   id: string;
+  task_date: string;
   subject: "math" | "english";
   difficulty: number;
   problem_type: "multiple_choice" | "short_answer" | "descriptive";
@@ -43,7 +46,7 @@ export default async function TaskDetailPage({
   const { data: taskData } = await supabase
     .from("daily_tasks")
     .select(
-      "id, subject, difficulty, problem_type, problem_statement, choices, estimated_minutes, unit:curriculum_units(name_ja)",
+      "id, task_date, subject, difficulty, problem_type, problem_statement, choices, estimated_minutes, unit:curriculum_units(name_ja)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -52,6 +55,8 @@ export default async function TaskDetailPage({
   }
   const task = taskData as unknown as TaskDetail;
   const unit = Array.isArray(task.unit) ? task.unit[0] : task.unit;
+  const today = formatInTimeZone(new Date(), APP_TIMEZONE, "yyyy-MM-dd");
+  const isToday = task.task_date === today;
 
   const { data: submissionData } = await supabase
     .from("submissions")
@@ -86,12 +91,18 @@ export default async function TaskDetailPage({
         <MathText text={task.problem_statement} className="math-text" />
       </section>
 
-      {!submission && (
+      {!submission && isToday && (
         <AnswerForm
           taskId={task.id}
           problemType={task.problem_type}
           choices={task.choices}
         />
+      )}
+
+      {!submission && !isToday && (
+        <p className="mt-6 rounded border bg-gray-50 p-4 text-sm text-gray-600">
+          この課題は本日分ではないため、解答の受付を終了しています。
+        </p>
       )}
 
       {submission && !review && (

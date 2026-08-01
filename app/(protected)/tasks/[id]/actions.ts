@@ -2,12 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { gradeSubmission } from "@/lib/gemini/gradeSubmission";
 import { transcribeAnswerImage } from "@/lib/gemini/transcribeAnswerImage";
 import { applyMasteryUpdate } from "@/lib/study/mastery";
-import { GEMINI_MODEL_STRONG } from "@/lib/config";
+import { APP_TIMEZONE, GEMINI_MODEL_STRONG } from "@/lib/config";
 import type { Subject } from "@/lib/curriculum";
 
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024; // 10MB
@@ -95,11 +96,16 @@ export async function submitAnswer(taskId: string, formData: FormData): Promise<
 
   const { data: task, error: taskError } = await supabase
     .from("daily_tasks")
-    .select("subject, unit_id, problem_statement, model_answer")
+    .select("task_date, subject, unit_id, problem_statement, model_answer")
     .eq("id", taskId)
     .single();
   if (taskError || !task) {
     throw new Error("課題が見つかりません");
+  }
+
+  const today = formatInTimeZone(new Date(), APP_TIMEZONE, "yyyy-MM-dd");
+  if (task.task_date !== today) {
+    throw new Error("この課題は本日分ではないため、解答の受付を終了しています");
   }
 
   const { data: submission, error: submissionError } = await supabase

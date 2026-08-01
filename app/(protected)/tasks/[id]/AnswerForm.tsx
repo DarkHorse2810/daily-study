@@ -67,7 +67,6 @@ export function AnswerForm({ taskId, problemType, choices }: AnswerFormProps) {
                 ref={fileInputRef}
                 type="file"
                 accept="image/*"
-                capture="environment"
                 className="hidden"
                 onChange={handlePhotoChange}
                 disabled={isTranscribing}
