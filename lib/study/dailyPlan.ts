@@ -1,5 +1,6 @@
 import {
   ENGLISH_PROBLEM_TYPE,
+  ENGLISH_PROBLEMS_PER_DAY,
   ENGLISH_ROTATION_CODES,
   mathProblemType,
   SINGLE_LARGE_DIFFICULTY,
@@ -89,9 +90,118 @@ function resolveProblemType(params: {
   return ENGLISH_PROBLEM_TYPE[params.unit.code] ?? "short_answer";
 }
 
+function findOverrideUnit(
+  units: CurriculumUnitRow[],
+  override: GenerationOverrideRow,
+): CurriculumUnitRow {
+  const unit = units.find((u) => u.id === override.unit_id);
+  if (!unit) {
+    throw new Error(`generation_overrides.unit_id ${override.unit_id} not found in curriculum_units`);
+  }
+  return unit;
+}
+
+function toPlannedTasks(
+  unit: CurriculumUnitRow,
+  count: number,
+  params: {
+    subject: Subject;
+    dailyFormat: DailyFormat;
+    override: GenerationOverrideRow | null;
+    masteryByUnitId: Map<string, MasteryRow>;
+  },
+): PlannedTask[] {
+  const difficulty = resolveDifficultyForUnit({
+    override: params.override,
+    unit,
+    dailyFormat: params.dailyFormat,
+    masteryByUnitId: params.masteryByUnitId,
+  });
+  const problemType = resolveProblemType({
+    subject: params.subject,
+    unit,
+    dailyFormat: params.dailyFormat,
+    difficulty,
+  });
+  return Array.from({ length: count }, () => ({
+    unitId: unit.id,
+    unitNameJa: unit.name_ja,
+    difficulty,
+    problemType,
+  }));
+}
+
+/**
+ * 数学: subject_settings.problems_per_day（またはsingle_largeなら1）件を、
+ * overrideがあれば全件同じ単元、無ければ弱点重み付けで単元ごとに1件ずつ選ぶ。
+ */
+function planMathTasks(params: {
+  dailyFormat: DailyFormat;
+  count: number;
+  override: GenerationOverrideRow | null;
+  units: CurriculumUnitRow[];
+  masteryByUnitId: Map<string, MasteryRow>;
+}): PlannedTask[] {
+  let selectedUnits: CurriculumUnitRow[];
+  if (params.override?.unit_id) {
+    const overrideUnit = findOverrideUnit(params.units, params.override);
+    selectedUnits = Array.from({ length: params.count }, () => overrideUnit);
+  } else {
+    selectedUnits = weightedSampleWithoutReplacement(
+      params.units,
+      (u) => unitWeight(u, params.masteryByUnitId),
+      params.count,
+    );
+  }
+
+  return selectedUnits.flatMap((unit) =>
+    toPlannedTasks(unit, 1, {
+      subject: "math",
+      dailyFormat: params.dailyFormat,
+      override: params.override,
+      masteryByUnitId: params.masteryByUnitId,
+    }),
+  );
+}
+
+/**
+ * 英語: まず1カテゴリだけ選び（overrideがあればそれを、無ければ弱点重み付けでローテーション対象から）、
+ * そのカテゴリの1日あたり出題数（ENGLISH_PROBLEMS_PER_DAY、単語20/文法10/長文・英作文1）だけ生成する。
+ * subject_settings.problems_per_dayは英語には使わない。
+ */
+function planEnglishTasks(params: {
+  dailyFormat: DailyFormat;
+  override: GenerationOverrideRow | null;
+  units: CurriculumUnitRow[];
+  masteryByUnitId: Map<string, MasteryRow>;
+}): PlannedTask[] {
+  let unit: CurriculumUnitRow;
+  if (params.override?.unit_id) {
+    unit = findOverrideUnit(params.units, params.override);
+  } else {
+    const candidateUnits = params.units.filter((u) =>
+      (ENGLISH_ROTATION_CODES as readonly string[]).includes(u.code),
+    );
+    const [picked] = weightedSampleWithoutReplacement(
+      candidateUnits,
+      (u) => unitWeight(u, params.masteryByUnitId),
+      1,
+    );
+    unit = picked;
+  }
+
+  const count = ENGLISH_PROBLEMS_PER_DAY[unit.code] ?? 1;
+  return toPlannedTasks(unit, count, {
+    subject: "english",
+    dailyFormat: params.dailyFormat,
+    override: params.override,
+    masteryByUnitId: params.masteryByUnitId,
+  });
+}
+
 /**
  * 1日分の出題単元・難易度・出題形式を決定する（純粋関数、DB/API呼び出しなし）。
- * overrideのunit_idが指定されている場合は、count件すべてその単元にする
+ * overrideのunit_idが指定されている場合は、その単元の出題数ぶん全件同じ単元にする
  * （考査直前の集中ドリル用途。英語のローテーション対象外である英文解釈も、override指定時は例外的に選べる）。
  */
 export function planDailyTasks(params: {
@@ -104,40 +214,20 @@ export function planDailyTasks(params: {
 }): PlannedTask[] {
   const masteryByUnitId = new Map(params.masteryRows.map((m) => [m.unit_id, m]));
 
-  let selectedUnits: CurriculumUnitRow[];
-  if (params.override?.unit_id) {
-    const overrideUnit = params.units.find((u) => u.id === params.override!.unit_id);
-    if (!overrideUnit) {
-      throw new Error(
-        `generation_overrides.unit_id ${params.override.unit_id} not found in curriculum_units`,
-      );
-    }
-    selectedUnits = Array.from({ length: params.count }, () => overrideUnit);
-  } else {
-    const candidateUnits =
-      params.subject === "english"
-        ? params.units.filter((u) => (ENGLISH_ROTATION_CODES as readonly string[]).includes(u.code))
-        : params.units;
-    selectedUnits = weightedSampleWithoutReplacement(
-      candidateUnits,
-      (u) => unitWeight(u, masteryByUnitId),
-      params.count,
-    );
-  }
-
-  return selectedUnits.map((unit) => {
-    const difficulty = resolveDifficultyForUnit({
-      override: params.override,
-      unit,
+  if (params.subject === "english") {
+    return planEnglishTasks({
       dailyFormat: params.dailyFormat,
+      override: params.override,
+      units: params.units,
       masteryByUnitId,
     });
-    const problemType = resolveProblemType({
-      subject: params.subject,
-      unit,
-      dailyFormat: params.dailyFormat,
-      difficulty,
-    });
-    return { unitId: unit.id, unitNameJa: unit.name_ja, difficulty, problemType };
+  }
+
+  return planMathTasks({
+    dailyFormat: params.dailyFormat,
+    count: params.count,
+    override: params.override,
+    units: params.units,
+    masteryByUnitId,
   });
 }

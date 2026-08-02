@@ -108,45 +108,54 @@ async function generateForSubject(admin: AdminClient, subject: Subject, today: s
       masteryRows,
     });
 
+    // 1件ずつ生成する。単語カテゴリの日は20件になるため、途中の1件が
+    // レート制限等で失敗しても残りは続行し、生成できた分だけ保存する。
     let generatedCount = 0;
+    let lastError: string | null = null;
     for (const planned of plannedTasks) {
-      const problem = await generateProblem({
-        subject,
-        unitNameJa: planned.unitNameJa,
-        difficulty: planned.difficulty,
-        problemType: planned.problemType,
-      });
+      try {
+        const problem = await generateProblem({
+          subject,
+          unitNameJa: planned.unitNameJa,
+          difficulty: planned.difficulty,
+          problemType: planned.problemType,
+        });
 
-      const { error: insertError } = await admin.from("daily_tasks").insert({
-        task_date: today,
-        subject,
-        unit_id: planned.unitId,
-        difficulty: planned.difficulty,
-        problem_type: problem.problem_type,
-        problem_statement: problem.problem_statement,
-        choices: problem.choices ?? null,
-        model_answer: problem.model_answer,
-        solution_steps: problem.solution_steps,
-        estimated_minutes: problem.estimated_minutes,
-        generation_model: problem.generationModel,
-        generation_metadata: {
-          selection: override?.unit_id ? "override" : "weighted",
-          override_id: override?.id ?? null,
-        },
-      });
+        const { error: insertError } = await admin.from("daily_tasks").insert({
+          task_date: today,
+          subject,
+          unit_id: planned.unitId,
+          difficulty: planned.difficulty,
+          problem_type: problem.problem_type,
+          problem_statement: problem.problem_statement,
+          choices: problem.choices ?? null,
+          model_answer: problem.model_answer,
+          solution_steps: problem.solution_steps,
+          estimated_minutes: problem.estimated_minutes,
+          generation_model: problem.generationModel,
+          generation_metadata: {
+            selection: override?.unit_id ? "override" : "weighted",
+            override_id: override?.id ?? null,
+          },
+        });
 
-      if (insertError) {
-        throw new Error(`daily_tasks insert failed: ${insertError.message}`);
+        if (insertError) {
+          throw new Error(`daily_tasks insert failed: ${insertError.message}`);
+        }
+        generatedCount++;
+      } catch (itemError) {
+        lastError = itemError instanceof Error ? itemError.message : String(itemError);
+        console.error(`generateProblem failed for unit ${planned.unitId}`, itemError);
       }
-      generatedCount++;
     }
 
     if (override) {
       await admin.from("generation_overrides").update({ consumed: true }).eq("id", override.id);
     }
 
-    await finishRun(admin, runId, "success", generatedCount);
-    return { generated: generatedCount };
+    const status = generatedCount > 0 || plannedTasks.length === 0 ? "success" : "error";
+    await finishRun(admin, runId, status, generatedCount, lastError ?? undefined);
+    return { generated: generatedCount, total: plannedTasks.length, lastError };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await finishRun(admin, runId, "error", 0, message);

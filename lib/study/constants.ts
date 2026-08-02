@@ -32,6 +32,19 @@ export const ENGLISH_PROBLEM_TYPE: Record<string, ProblemType> = {
   eng_interpretation: "short_answer",
 };
 
+/**
+ * 英語はカテゴリごとに1日の出題数を変える（単語・文法は短時間で数をこなすドリル形式、
+ * 長文・英作文は1問あたりの負荷が高いため少数のまま）。subject_settings.problems_per_day
+ * は英語には使わず、この定数で決める。
+ */
+export const ENGLISH_PROBLEMS_PER_DAY: Record<string, number> = {
+  eng_vocabulary: 20,
+  eng_grammar_usage: 10,
+  eng_reading: 1,
+  eng_writing: 1,
+  eng_interpretation: 1,
+};
+
 /** 数学の出題形式を難易度から解決する（旧帝大レベルの数学はほぼ記述式のためmultiple_choiceは使わない）。 */
 export function mathProblemType(difficulty: Difficulty): ProblemType {
   return difficulty >= 4 ? "descriptive" : "short_answer";
