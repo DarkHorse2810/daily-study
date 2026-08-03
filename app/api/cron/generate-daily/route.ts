@@ -108,8 +108,8 @@ async function generateForSubject(admin: AdminClient, subject: Subject, today: s
       masteryRows,
     });
 
-    // 1件ずつ生成する。単語カテゴリの日は20件になるため、途中の1件が
-    // レート制限等で失敗しても残りは続行し、生成できた分だけ保存する。
+    // 1件ずつ生成する（数学は最大5件）。途中の1件がレート制限等で失敗しても
+    // 残りは続行し、生成できた分だけ保存する。
     let generatedCount = 0;
     let lastError: string | null = null;
     for (const planned of plannedTasks) {
@@ -119,6 +119,7 @@ async function generateForSubject(admin: AdminClient, subject: Subject, today: s
           unitNameJa: planned.unitNameJa,
           difficulty: planned.difficulty,
           problemType: planned.problemType,
+          questionCount: planned.questionCount,
         });
 
         const { error: insertError } = await admin.from("daily_tasks").insert({

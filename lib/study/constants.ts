@@ -33,16 +33,13 @@ export const ENGLISH_PROBLEM_TYPE: Record<string, ProblemType> = {
 };
 
 /**
- * 英語はカテゴリごとに1日の出題数を変える（単語・文法は短時間で数をこなすドリル形式、
- * 長文・英作文は1問あたりの負荷が高いため少数のまま）。subject_settings.problems_per_day
- * は英語には使わず、この定数で決める。
+ * 英語の単語・文法カテゴリは、1つの課題（1レコード）の中に複数の小問をまとめた
+ * ドリル形式で出題する（短時間で数をこなすため）。値は1課題あたりの小問数。
+ * ここに無いカテゴリ（長文・英作文・英文解釈）は通常通り1問のみの課題になる。
  */
-export const ENGLISH_PROBLEMS_PER_DAY: Record<string, number> = {
+export const ENGLISH_BUNDLE_QUESTION_COUNT: Record<string, number> = {
   eng_vocabulary: 20,
   eng_grammar_usage: 10,
-  eng_reading: 1,
-  eng_writing: 1,
-  eng_interpretation: 1,
 };
 
 /** 数学の出題形式を難易度から解決する（旧帝大レベルの数学はほぼ記述式のためmultiple_choiceは使わない）。 */

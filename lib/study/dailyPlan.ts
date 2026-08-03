@@ -1,6 +1,6 @@
 import {
+  ENGLISH_BUNDLE_QUESTION_COUNT,
   ENGLISH_PROBLEM_TYPE,
-  ENGLISH_PROBLEMS_PER_DAY,
   ENGLISH_ROTATION_CODES,
   mathProblemType,
   SINGLE_LARGE_DIFFICULTY,
@@ -30,6 +30,8 @@ export interface PlannedTask {
   unitNameJa: string;
   difficulty: Difficulty;
   problemType: ProblemType;
+  /** 1課題にまとめる小問数（単語・文法ドリルは10/20、それ以外は1）。 */
+  questionCount: number;
 }
 
 /** 復元なし重み付き抽選。 */
@@ -103,13 +105,14 @@ function findOverrideUnit(
 
 function toPlannedTasks(
   unit: CurriculumUnitRow,
-  count: number,
+  taskCount: number,
   params: {
     subject: Subject;
     dailyFormat: DailyFormat;
     override: GenerationOverrideRow | null;
     masteryByUnitId: Map<string, MasteryRow>;
   },
+  questionCount = 1,
 ): PlannedTask[] {
   const difficulty = resolveDifficultyForUnit({
     override: params.override,
@@ -123,11 +126,12 @@ function toPlannedTasks(
     dailyFormat: params.dailyFormat,
     difficulty,
   });
-  return Array.from({ length: count }, () => ({
+  return Array.from({ length: taskCount }, () => ({
     unitId: unit.id,
     unitNameJa: unit.name_ja,
     difficulty,
     problemType,
+    questionCount,
   }));
 }
 
@@ -166,7 +170,8 @@ function planMathTasks(params: {
 
 /**
  * 英語: まず1カテゴリだけ選び（overrideがあればそれを、無ければ弱点重み付けでローテーション対象から）、
- * そのカテゴリの1日あたり出題数（ENGLISH_PROBLEMS_PER_DAY、単語20/文法10/長文・英作文1）だけ生成する。
+ * 課題は常に1件だけ作る。単語・文法カテゴリはENGLISH_BUNDLE_QUESTION_COUNTに従い、
+ * その1件の中に小問を10/20問まとめたドリル形式にする（長文・英作文は小問1問のまま）。
  * subject_settings.problems_per_dayは英語には使わない。
  */
 function planEnglishTasks(params: {
@@ -190,13 +195,18 @@ function planEnglishTasks(params: {
     unit = picked;
   }
 
-  const count = ENGLISH_PROBLEMS_PER_DAY[unit.code] ?? 1;
-  return toPlannedTasks(unit, count, {
-    subject: "english",
-    dailyFormat: params.dailyFormat,
-    override: params.override,
-    masteryByUnitId: params.masteryByUnitId,
-  });
+  const questionCount = ENGLISH_BUNDLE_QUESTION_COUNT[unit.code] ?? 1;
+  return toPlannedTasks(
+    unit,
+    1,
+    {
+      subject: "english",
+      dailyFormat: params.dailyFormat,
+      override: params.override,
+      masteryByUnitId: params.masteryByUnitId,
+    },
+    questionCount,
+  );
 }
 
 /**

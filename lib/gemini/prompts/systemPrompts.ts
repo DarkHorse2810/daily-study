@@ -5,9 +5,26 @@ export function buildProblemGenerationPrompt(params: {
   unitNameJa: string;
   difficulty: Difficulty;
   problemType: ProblemType;
+  questionCount?: number;
 }): string {
   const subjectLabel = params.subject === "math" ? "数学" : "英語";
   const difficultyLabel = DIFFICULTY_LABELS[params.difficulty];
+  const questionCount = params.questionCount ?? 1;
+
+  if (questionCount > 1) {
+    return `あなたは日本の高校生向け${subjectLabel}指導のプロフェッショナルです。
+以下の条件で、オリジナルの小問を${questionCount}問まとめた1つのドリル形式の課題を作成してください。
+
+- 単元: ${params.unitNameJa}
+- 難易度: ${difficultyLabel}（レベル${params.difficulty}/5）
+- 各小問の出題形式: ${params.problemType}
+- problem_statement には、1〜${questionCount}の番号を振った小問を全てまとめて記載してください（選択肢がある場合は各小問の本文中に①②③④として含め、choicesフィールドは使わないでください）
+- model_answer には、各小問の正解を番号に対応させて全てまとめて記載してください
+- solution_steps には、各小問の解説を番号に対応させて全てまとめて記載してください
+- 数式はLaTeX記法（$...$）で記述してください
+- estimated_minutes は${questionCount}問全体にかかる目安時間にしてください
+- 既存の入試問題の丸写しは避け、オリジナルの問題を作成してください`;
+  }
 
   return `あなたは日本の高校生向け${subjectLabel}指導のプロフェッショナルです。
 以下の条件でオリジナルの問題を1問作成してください。

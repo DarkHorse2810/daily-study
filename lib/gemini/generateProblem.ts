@@ -11,6 +11,8 @@ export interface GenerateProblemParams {
   unitNameJa: string;
   difficulty: Difficulty;
   problemType: ProblemType;
+  /** 1課題にまとめる小問数（単語・文法ドリル等）。未指定なら1問。 */
+  questionCount?: number;
 }
 
 export type GeneratedProblem = Problem & { generationModel: string };
