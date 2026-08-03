@@ -4,6 +4,10 @@
     {
       "path": "/api/cron/generate-daily",
       "schedule": "0 19 * * *"
+    },
+    {
+      "path": "/api/cron/remind-unanswered",
+      "schedule": "0 14 * * *"
     }
   ]
 }

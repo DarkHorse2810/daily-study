@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { formatInTimeZone } from "date-fns-tz";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateProblem } from "@/lib/gemini/generateProblem";
+import { sendPushToAllSubscriptions } from "@/lib/push/webpush";
 import { APP_TIMEZONE } from "@/lib/config";
 import {
   planDailyTasks,
@@ -38,6 +39,20 @@ export async function GET(request: Request) {
   const results: Record<string, unknown> = {};
   for (const subject of SUBJECTS) {
     results[subject] = await generateForSubject(admin, subject, today);
+  }
+
+  // 冪等性チェックによりスキップされた場合はgeneratedが付かないため、
+  // 実際にその日初めて生成できたときだけ通知する（再実行での重複通知を防ぐ）。
+  const anyGenerated = SUBJECTS.some((subject) => {
+    const result = results[subject] as { generated?: number } | undefined;
+    return typeof result?.generated === "number" && result.generated > 0;
+  });
+  if (anyGenerated) {
+    await sendPushToAllSubscriptions({
+      title: "daily study",
+      body: `${today}の課題が更新されました。`,
+      url: "/dashboard",
+    });
   }
 
   return NextResponse.json({ status: "ok", date: today, results });

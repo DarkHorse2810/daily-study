@@ -53,3 +53,52 @@ export async function updateMathUnitSettings(formData: FormData): Promise<void> 
   revalidatePath("/settings");
   redirect("/settings?saved=1");
 }
+
+interface PushSubscriptionInput {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+}
+
+/** ブラウザのPush購読情報を保存する（端末ごとに1行、endpointで重複を防ぐ）。 */
+export async function savePushSubscription(subscription: PushSubscriptionInput): Promise<void> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    throw new Error("ログインが必要です");
+  }
+
+  const { error } = await supabase.from("push_subscriptions").upsert(
+    {
+      user_id: user.id,
+      endpoint: subscription.endpoint,
+      p256dh: subscription.keys.p256dh,
+      auth: subscription.keys.auth,
+    },
+    { onConflict: "endpoint" },
+  );
+  if (error) {
+    throw new Error(`通知の登録に失敗しました: ${error.message}`);
+  }
+}
+
+/** この端末の通知登録を解除する。 */
+export async function deletePushSubscription(endpoint: string): Promise<void> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    throw new Error("ログインが必要です");
+  }
+
+  const { error } = await supabase
+    .from("push_subscriptions")
+    .delete()
+    .eq("endpoint", endpoint)
+    .eq("user_id", user.id);
+  if (error) {
+    throw new Error(`通知の解除に失敗しました: ${error.message}`);
+  }
+}

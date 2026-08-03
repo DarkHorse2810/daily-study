@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { VAPID_PUBLIC_KEY } from "@/lib/config";
+import { PushNotificationToggle } from "@/lib/components/PushNotificationToggle";
 import { updateMathUnitSettings } from "./actions";
 
 interface MathUnitRow {
@@ -47,6 +49,8 @@ export default async function SettingsPage({
           保存する
         </button>
       </form>
+
+      <PushNotificationToggle vapidPublicKey={VAPID_PUBLIC_KEY} />
     </main>
   );
 }
