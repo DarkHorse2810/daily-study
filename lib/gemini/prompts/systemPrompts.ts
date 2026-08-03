@@ -11,6 +11,24 @@ export function buildProblemGenerationPrompt(params: {
   const difficultyLabel = DIFFICULTY_LABELS[params.difficulty];
   const questionCount = params.questionCount ?? 1;
 
+  if (questionCount > 1 && params.problemType === "multiple_choice") {
+    return `あなたは日本の高校生向け${subjectLabel}指導のプロフェッショナルです。
+以下の条件で、オリジナルの4択の小問を${questionCount}問まとめた1つのドリル形式の課題を作成してください。
+
+- 単元: ${params.unitNameJa}
+- 難易度: ${difficultyLabel}（レベル${params.difficulty}/5）
+- problem_statement には、全小問に共通する短い指示文のみを記載してください（各小問の本文はここに含めないでください）
+- sub_items に、1〜${questionCount}の小問を配列で作成してください。各要素には次を含めてください:
+  - number: 1から${questionCount}までの通し番号
+  - question_text: その小問の本文（空欄がある場合は（　　）等で示す）
+  - choices: 4つの選択肢のテキストのみの配列（①②③④等の記号は付けないでください。UI側で自動的に番号を付けます）
+- choicesフィールド（トップレベル）は使わないでください
+- model_answer には、各小問の正解を「1. ②」のように番号と選択肢の番号（①〜④）で全てまとめて記載してください
+- solution_steps には、各小問の解説を番号に対応させて全てまとめて記載してください
+- estimated_minutes は${questionCount}問全体にかかる目安時間にしてください
+- 既存の入試問題の丸写しは避け、オリジナルの問題を作成してください`;
+  }
+
   if (questionCount > 1) {
     return `あなたは日本の高校生向け${subjectLabel}指導のプロフェッショナルです。
 以下の条件で、オリジナルの小問を${questionCount}問まとめた1つのドリル形式の課題を作成してください。
@@ -18,7 +36,7 @@ export function buildProblemGenerationPrompt(params: {
 - 単元: ${params.unitNameJa}
 - 難易度: ${difficultyLabel}（レベル${params.difficulty}/5）
 - 各小問の出題形式: ${params.problemType}
-- problem_statement には、1〜${questionCount}の番号を振った小問を全てまとめて記載してください（選択肢がある場合は各小問の本文中に①②③④として含め、choicesフィールドは使わないでください）
+- problem_statement には、（１）（２）のように全角括弧の通し番号を振った小問を、小問ごとに改行して全てまとめて記載してください
 - model_answer には、各小問の正解を番号に対応させて全てまとめて記載してください
 - solution_steps には、各小問の解説を番号に対応させて全てまとめて記載してください
 - 数式はLaTeX記法（$...$）で記述してください

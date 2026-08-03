@@ -130,6 +130,7 @@ async function generateForSubject(admin: AdminClient, subject: Subject, today: s
           problem_type: problem.problem_type,
           problem_statement: problem.problem_statement,
           choices: problem.choices ?? null,
+          sub_items: problem.sub_items ?? null,
           model_answer: problem.model_answer,
           solution_steps: problem.solution_steps,
           estimated_minutes: problem.estimated_minutes,

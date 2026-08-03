@@ -6,8 +6,15 @@ import { APP_TIMEZONE } from "@/lib/config";
 import type { Difficulty } from "@/lib/curriculum";
 import { MathText } from "@/lib/components/MathText";
 import { DifficultyStars } from "@/lib/components/DifficultyStars";
-import { retryGrading } from "./actions";
+import { BundledChoiceForm } from "@/lib/components/BundledChoiceForm";
+import { retryGrading, submitAnswer } from "./actions";
 import { AnswerForm } from "./AnswerForm";
+
+interface SubItem {
+  number: number;
+  question_text: string;
+  choices: string[];
+}
 
 interface TaskDetail {
   id: string;
@@ -17,6 +24,7 @@ interface TaskDetail {
   problem_type: "multiple_choice" | "short_answer" | "descriptive";
   problem_statement: string;
   choices: string[] | null;
+  sub_items: SubItem[] | null;
   estimated_minutes: number | null;
   unit: { name_ja: string } | { name_ja: string }[] | null;
 }
@@ -49,7 +57,7 @@ export default async function TaskDetailPage({
     supabase
       .from("daily_tasks")
       .select(
-        "id, task_date, subject, difficulty, problem_type, problem_statement, choices, estimated_minutes, unit:curriculum_units(name_ja)",
+        "id, task_date, subject, difficulty, problem_type, problem_statement, choices, sub_items, estimated_minutes, unit:curriculum_units(name_ja)",
       )
       .eq("id", id)
       .maybeSingle(),
@@ -95,7 +103,15 @@ export default async function TaskDetailPage({
         <MathText text={task.problem_statement} className="math-text" />
       </section>
 
-      {!submission && isToday && (
+      {!submission && isToday && task.sub_items && task.sub_items.length > 0 && (
+        <BundledChoiceForm
+          taskId={task.id}
+          subItems={task.sub_items}
+          submitAction={submitAnswer}
+        />
+      )}
+
+      {!submission && isToday && !(task.sub_items && task.sub_items.length > 0) && (
         <AnswerForm
           taskId={task.id}
           problemType={task.problem_type}

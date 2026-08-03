@@ -70,8 +70,11 @@ export default async function DashboardPage({
 
       <CalendarMonth monthStr={monthStr} todayStr={today} datesWithTasks={datesWithTasks} />
 
-      <Link href="/settings" className="mt-6 block text-sm text-blue-600 underline">
-        設定
+      <Link
+        href="/settings"
+        className="mt-6 flex items-center justify-center gap-2 rounded border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+      >
+        ⚙️ 設定
       </Link>
     </main>
   );
