@@ -10,6 +10,10 @@ import { BundledChoiceForm } from "@/lib/components/BundledChoiceForm";
 import { retryGrading, submitAnswer } from "./actions";
 import { AnswerForm } from "./AnswerForm";
 
+// 写真提出時は「文字起こし→添削」の2回のGemini呼び出しをsubmitAnswer内で順番に行うため、
+// デフォルトの実行時間上限（Hobbyでは10秒）だと間に合わないことがある。
+export const maxDuration = 60;
+
 interface SubItem {
   number: number;
   question_text: string;

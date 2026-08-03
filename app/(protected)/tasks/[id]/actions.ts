@@ -55,37 +55,35 @@ async function gradeAndScore(params: GradeAndScoreParams): Promise<void> {
   await applyMasteryUpdate({ userId: params.userId, unitId: params.unitId, review });
 }
 
-/** 写真をアップロードし、Geminiで解答テキストを読み取る。ログイン必須（未ログインの直接呼び出しを防ぐ）。 */
-export async function transcribePhoto(formData: FormData): Promise<string> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    throw new Error("ログインが必要です");
+/**
+ * 解答テキストを解決する。写真が添付されている場合は、その写真をそのまま解答として
+ * 提出できるようにGeminiで文字起こしする（提出後に「あなたの解答」として表示されるため、
+ * 生徒はそこで読み取り内容を確認できる）。写真が無ければ入力されたテキストをそのまま使う。
+ */
+async function resolveAnswerText(formData: FormData): Promise<string> {
+  const photo = formData.get("photo");
+  if (photo instanceof File && photo.size > 0) {
+    if (photo.size > MAX_PHOTO_BYTES) {
+      throw new Error("写真のサイズが大きすぎます（10MBまで）");
+    }
+    const arrayBuffer = await photo.arrayBuffer();
+    const base64 = Buffer.from(arrayBuffer).toString("base64");
+    const mimeType = photo.type || "image/jpeg";
+    const transcribed = (await transcribeAnswerImage({ base64, mimeType })).trim();
+    if (!transcribed) {
+      throw new Error("写真から解答を読み取れませんでした。文字がはっきり写るように撮り直してください。");
+    }
+    return transcribed;
   }
 
-  const file = formData.get("photo");
-  if (!(file instanceof File) || file.size === 0) {
-    throw new Error("写真が選択されていません");
+  const answerText = String(formData.get("answer") ?? "").trim();
+  if (!answerText) {
+    throw new Error("解答を入力するか、写真を選択してください");
   }
-  if (file.size > MAX_PHOTO_BYTES) {
-    throw new Error("写真のサイズが大きすぎます（10MBまで）");
-  }
-
-  const arrayBuffer = await file.arrayBuffer();
-  const base64 = Buffer.from(arrayBuffer).toString("base64");
-  const mimeType = file.type || "image/jpeg";
-
-  return transcribeAnswerImage({ base64, mimeType });
+  return answerText;
 }
 
 export async function submitAnswer(taskId: string, formData: FormData): Promise<void> {
-  const answerText = String(formData.get("answer") ?? "").trim();
-  if (!answerText) {
-    throw new Error("解答を入力してください");
-  }
-
   const supabase = await createClient();
   const {
     data: { user },
@@ -107,6 +105,8 @@ export async function submitAnswer(taskId: string, formData: FormData): Promise<
   if (task.task_date !== today) {
     throw new Error("この課題は本日分ではないため、解答の受付を終了しています");
   }
+
+  const answerText = await resolveAnswerText(formData);
 
   const { data: submission, error: submissionError } = await supabase
     .from("submissions")
