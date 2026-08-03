@@ -15,6 +15,11 @@ import type { Subject } from "@/lib/curriculum";
 const SUBJECTS: Subject[] = ["math", "english"];
 const NIL_UUID = "00000000-0000-0000-0000-000000000000";
 
+// Vercelのデフォルト実行時間上限（Hobbyでは10秒）だと、数学5問+英語ドリルを
+// 順番に生成する処理が間に合わずFUNCTION_INVOCATION_TIMEOUTになることがあるため、
+// Hobbyプランの上限である60秒まで明示的に延長する。
+export const maxDuration = 60;
+
 type AdminClient = ReturnType<typeof createAdminClient>;
 
 /**
