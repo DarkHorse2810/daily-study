@@ -6,12 +6,40 @@ import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { gradeSubmission } from "@/lib/gemini/gradeSubmission";
-import { transcribeAnswerImage } from "@/lib/gemini/transcribeAnswerImage";
 import { applyMasteryUpdate } from "@/lib/study/mastery";
 import { APP_TIMEZONE, GEMINI_MODEL_STRONG } from "@/lib/config";
+import type { Review } from "@/lib/gemini/schemas/review";
 import type { Subject } from "@/lib/curriculum";
 
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024; // 10MB
+
+interface PersistReviewParams {
+  submissionId: string;
+  userId: string;
+  unitId: string;
+  review: Review;
+}
+
+/** 添削結果をreviews/user_topic_masteryへ反映する（Gemini呼び出しは既に完了している前提）。 */
+async function persistReview(params: PersistReviewParams): Promise<void> {
+  const admin = createAdminClient();
+
+  const { error: reviewError } = await admin.from("reviews").insert({
+    submission_id: params.submissionId,
+    is_correct: params.review.is_correct,
+    score: params.review.score,
+    feedback: params.review.feedback,
+    strengths: params.review.strengths ?? null,
+    improvement_points: params.review.improvement_points ?? null,
+    corrected_answer: params.review.corrected_answer ?? null,
+    grading_model: GEMINI_MODEL_STRONG,
+  });
+  if (reviewError) {
+    throw new Error(`添削結果の保存に失敗しました: ${reviewError.message}`);
+  }
+
+  await applyMasteryUpdate({ userId: params.userId, unitId: params.unitId, review: params.review });
+}
 
 interface GradeAndScoreParams {
   submissionId: string;
@@ -23,64 +51,20 @@ interface GradeAndScoreParams {
   studentAnswer: string;
 }
 
-/**
- * 添削を実行しreviews/user_topic_masteryへ反映する。
- * ここでの失敗は握りつぶし、呼び出し元は必ずリダイレクトする
- * （提出済み・review未作成の状態としてページ側の「採点中」表示＋再試行ボタンに任せる）。
- */
+/** テキスト解答を添削し、reviews/user_topic_masteryへ反映する（Gemini呼び出しを1回行う）。 */
 async function gradeAndScore(params: GradeAndScoreParams): Promise<void> {
-  const admin = createAdminClient();
-
   const review = await gradeSubmission({
     subject: params.subject,
     problemStatement: params.problemStatement,
     modelAnswer: params.modelAnswer,
     studentAnswer: params.studentAnswer,
   });
-
-  const { error: reviewError } = await admin.from("reviews").insert({
-    submission_id: params.submissionId,
-    is_correct: review.is_correct,
-    score: review.score,
-    feedback: review.feedback,
-    strengths: review.strengths ?? null,
-    improvement_points: review.improvement_points ?? null,
-    corrected_answer: review.corrected_answer ?? null,
-    grading_model: GEMINI_MODEL_STRONG,
+  await persistReview({
+    submissionId: params.submissionId,
+    userId: params.userId,
+    unitId: params.unitId,
+    review,
   });
-  if (reviewError) {
-    throw new Error(`添削結果の保存に失敗しました: ${reviewError.message}`);
-  }
-
-  await applyMasteryUpdate({ userId: params.userId, unitId: params.unitId, review });
-}
-
-/**
- * 解答テキストを解決する。写真が添付されている場合は、その写真をそのまま解答として
- * 提出できるようにGeminiで文字起こしする（提出後に「あなたの解答」として表示されるため、
- * 生徒はそこで読み取り内容を確認できる）。写真が無ければ入力されたテキストをそのまま使う。
- */
-async function resolveAnswerText(formData: FormData): Promise<string> {
-  const photo = formData.get("photo");
-  if (photo instanceof File && photo.size > 0) {
-    if (photo.size > MAX_PHOTO_BYTES) {
-      throw new Error("写真のサイズが大きすぎます（10MBまで）");
-    }
-    const arrayBuffer = await photo.arrayBuffer();
-    const base64 = Buffer.from(arrayBuffer).toString("base64");
-    const mimeType = photo.type || "image/jpeg";
-    const transcribed = (await transcribeAnswerImage({ base64, mimeType })).trim();
-    if (!transcribed) {
-      throw new Error("写真から解答を読み取れませんでした。文字がはっきり写るように撮り直してください。");
-    }
-    return transcribed;
-  }
-
-  const answerText = String(formData.get("answer") ?? "").trim();
-  if (!answerText) {
-    throw new Error("解答を入力するか、写真を選択してください");
-  }
-  return answerText;
 }
 
 export async function submitAnswer(taskId: string, formData: FormData): Promise<void> {
@@ -106,7 +90,39 @@ export async function submitAnswer(taskId: string, formData: FormData): Promise<
     throw new Error("この課題は本日分ではないため、解答の受付を終了しています");
   }
 
-  const answerText = await resolveAnswerText(formData);
+  const photo = formData.get("photo");
+  const hasPhoto = photo instanceof File && photo.size > 0;
+
+  let answerText: string;
+  let photoReview: Review | null = null;
+
+  if (hasPhoto) {
+    if ((photo as File).size > MAX_PHOTO_BYTES) {
+      throw new Error("写真のサイズが大きすぎます（10MBまで）");
+    }
+    const arrayBuffer = await (photo as File).arrayBuffer();
+    const base64 = Buffer.from(arrayBuffer).toString("base64");
+    const mimeType = (photo as File).type || "image/jpeg";
+
+    // 写真提出は「文字起こし→添削」を1回のGemini呼び出しでまとめて行う
+    // （2回に分けると時間がかかりすぎるため）。ここで失敗した場合は解答自体が
+    // 提出できないため、そのままエラーを投げてerror.tsxで再試行を促す。
+    photoReview = await gradeSubmission({
+      subject: task.subject,
+      problemStatement: task.problem_statement,
+      modelAnswer: task.model_answer,
+      studentAnswerImage: { base64, mimeType },
+    });
+    answerText = photoReview.transcribed_answer?.trim() || "";
+    if (!answerText) {
+      throw new Error("写真から解答を読み取れませんでした。文字がはっきり写るように撮り直してください。");
+    }
+  } else {
+    answerText = String(formData.get("answer") ?? "").trim();
+    if (!answerText) {
+      throw new Error("解答を入力するか、写真を選択してください");
+    }
+  }
 
   const { data: submission, error: submissionError } = await supabase
     .from("submissions")
@@ -118,15 +134,24 @@ export async function submitAnswer(taskId: string, formData: FormData): Promise<
   }
 
   try {
-    await gradeAndScore({
-      submissionId: submission.id,
-      userId: user.id,
-      subject: task.subject,
-      unitId: task.unit_id,
-      problemStatement: task.problem_statement,
-      modelAnswer: task.model_answer,
-      studentAnswer: answerText,
-    });
+    if (photoReview) {
+      await persistReview({
+        submissionId: submission.id,
+        userId: user.id,
+        unitId: task.unit_id,
+        review: photoReview,
+      });
+    } else {
+      await gradeAndScore({
+        submissionId: submission.id,
+        userId: user.id,
+        subject: task.subject,
+        unitId: task.unit_id,
+        problemStatement: task.problem_statement,
+        modelAnswer: task.model_answer,
+        studentAnswer: answerText,
+      });
+    }
   } catch (err) {
     console.error("grading failed after submission", err);
   }
