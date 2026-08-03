@@ -17,6 +17,11 @@ export interface GenerateProblemParams {
 
 export type GeneratedProblem = Problem & { generationModel: string };
 
+// cronは複数件を並列生成するため、1件が異常に長く応答しない場合に備えて
+// 個別にタイムアウトを設ける（Vercelの実行時間上限を1件の遅延で使い切らないため）。
+// SDK側の自動リトライも無効化し、遅延の積み重ねを防ぐ。
+const GENERATE_TIMEOUT_MS = 25_000;
+
 /** 難易度4〜5は推論力の高いGEMINI_MODEL_STRONG、それ以外はGEMINI_MODEL_FASTを使う。 */
 export async function generateProblem(params: GenerateProblemParams): Promise<GeneratedProblem> {
   const model = params.difficulty >= 4 ? GEMINI_MODEL_STRONG : GEMINI_MODEL_FAST;
@@ -25,15 +30,18 @@ export async function generateProblem(params: GenerateProblemParams): Promise<Ge
   const rawText = await callWithLogging(
     { model, purpose: "generate_problem" },
     async () => {
-      const interaction = await client.interactions.create({
-        model,
-        input: buildProblemGenerationPrompt(params),
-        response_format: {
-          type: "text",
-          mime_type: "application/json",
-          schema: PROBLEM_JSON_SCHEMA,
+      const interaction = await client.interactions.create(
+        {
+          model,
+          input: buildProblemGenerationPrompt(params),
+          response_format: {
+            type: "text",
+            mime_type: "application/json",
+            schema: PROBLEM_JSON_SCHEMA,
+          },
         },
-      });
+        { timeout_ms: GENERATE_TIMEOUT_MS, retries: { strategy: "none" } },
+      );
       const text = interaction.output_text;
       if (!text) {
         throw new Error("Gemini returned an empty response for generateProblem");

@@ -22,6 +22,10 @@ interface GradeSubmissionImageParams {
 
 export type GradeSubmissionParams = GradeSubmissionTextParams | GradeSubmissionImageParams;
 
+// 1回の応答が異常に長引いた場合でも、ページ側のmaxDuration（60秒）内で
+// 「採点中」表示に落ち着けるよう、SDK呼び出し自体にタイムアウトを設ける。
+const GRADE_TIMEOUT_MS = 40_000;
+
 /**
  * 添削は正確性が重要なため、常にGEMINI_MODEL_STRONGを使う。
  * 写真提出の場合は、文字起こしと添削を1回の呼び出しでまとめて行う
@@ -35,29 +39,32 @@ export async function gradeSubmission(params: GradeSubmissionParams): Promise<Re
   const rawText = await callWithLogging(
     { model, purpose: "grade_submission" },
     async () => {
-      const interaction = await client.interactions.create({
-        model,
-        input: isImage
-          ? [
-              {
-                type: "user_input" as const,
-                content: [
-                  { type: "text" as const, text: buildImageGradingPrompt(params) },
-                  {
-                    type: "image" as const,
-                    data: params.studentAnswerImage.base64,
-                    mime_type: params.studentAnswerImage.mimeType,
-                  },
-                ],
-              },
-            ]
-          : buildGradingPrompt(params),
-        response_format: {
-          type: "text",
-          mime_type: "application/json",
-          schema: REVIEW_JSON_SCHEMA,
+      const interaction = await client.interactions.create(
+        {
+          model,
+          input: isImage
+            ? [
+                {
+                  type: "user_input" as const,
+                  content: [
+                    { type: "text" as const, text: buildImageGradingPrompt(params) },
+                    {
+                      type: "image" as const,
+                      data: params.studentAnswerImage.base64,
+                      mime_type: params.studentAnswerImage.mimeType,
+                    },
+                  ],
+                },
+              ]
+            : buildGradingPrompt(params),
+          response_format: {
+            type: "text",
+            mime_type: "application/json",
+            schema: REVIEW_JSON_SCHEMA,
+          },
         },
-      });
+        { timeout_ms: GRADE_TIMEOUT_MS, retries: { strategy: "none" } },
+      );
       const text = interaction.output_text;
       if (!text) {
         throw new Error("Gemini returned an empty response for gradeSubmission");
