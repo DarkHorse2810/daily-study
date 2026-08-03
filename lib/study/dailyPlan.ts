@@ -26,6 +26,9 @@ export interface GenerationOverrideRow {
   difficulty: number | null;
 }
 
+/** 難易度(1〜5)ごとの出題数の手動指定。合計はcountと一致させること（呼び出し側で検証する）。 */
+export type DifficultyDistribution = Partial<Record<Difficulty, number>>;
+
 export interface PlannedTask {
   unitId: string;
   unitNameJa: string;
@@ -104,6 +107,23 @@ function findOverrideUnit(
   return unit;
 }
 
+/** 難易度ごとの出題数の指定を、指定数ぶんの難易度の配列に展開してシャッフルする。 */
+function expandAndShuffleDifficulties(
+  distribution: DifficultyDistribution,
+  count: number,
+): Difficulty[] {
+  const list: Difficulty[] = [];
+  for (const level of [1, 2, 3, 4, 5] as Difficulty[]) {
+    const n = distribution[level] ?? 0;
+    for (let i = 0; i < n; i++) list.push(level);
+  }
+  for (let i = list.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [list[i], list[j]] = [list[j], list[i]];
+  }
+  return list.slice(0, count);
+}
+
 function toPlannedTasks(
   unit: CurriculumUnitRow,
   taskCount: number,
@@ -114,13 +134,16 @@ function toPlannedTasks(
     masteryByUnitId: Map<string, MasteryRow>;
   },
   questionCount = 1,
+  fixedDifficulty?: Difficulty,
 ): PlannedTask[] {
-  const difficulty = resolveDifficultyForUnit({
-    override: params.override,
-    unit,
-    dailyFormat: params.dailyFormat,
-    masteryByUnitId: params.masteryByUnitId,
-  });
+  const difficulty =
+    fixedDifficulty ??
+    resolveDifficultyForUnit({
+      override: params.override,
+      unit,
+      dailyFormat: params.dailyFormat,
+      masteryByUnitId: params.masteryByUnitId,
+    });
   const problemType = resolveProblemType({
     subject: params.subject,
     unit,
@@ -141,6 +164,9 @@ function toPlannedTasks(
  * overrideがあれば全件同じ単元、無ければ弱点重み付けで単元ごとに1件ずつ選ぶ。
  * 弱点重み付け抽選の対象は設定画面でenabled=trueにした単元のみに絞る
  * （override指定はこのフラグに関係なく機能させるため、override解決には全単元を使う）。
+ * difficultyDistribution（設定画面で指定）があれば、単元は弱点重み付けのまま、
+ * 難易度だけを指定された内訳（例: ★2を3問、★3を2問）からシャッフルして割り当てる
+ * （override指定時とsingle_largeモードでは、この指定より優先度が低いため使わない）。
  */
 function planMathTasks(params: {
   dailyFormat: DailyFormat;
@@ -148,17 +174,44 @@ function planMathTasks(params: {
   override: GenerationOverrideRow | null;
   units: CurriculumUnitRow[];
   masteryByUnitId: Map<string, MasteryRow>;
+  difficultyDistribution: DifficultyDistribution | null;
 }): PlannedTask[] {
-  let selectedUnits: CurriculumUnitRow[];
   if (params.override?.unit_id) {
     const overrideUnit = findOverrideUnit(params.units, params.override);
-    selectedUnits = Array.from({ length: params.count }, () => overrideUnit);
-  } else {
-    const enabledUnits = params.units.filter((u) => u.enabled);
-    selectedUnits = weightedSampleWithoutReplacement(
-      enabledUnits,
-      (u) => unitWeight(u, params.masteryByUnitId),
-      params.count,
+    const selectedUnits = Array.from({ length: params.count }, () => overrideUnit);
+    return selectedUnits.flatMap((unit) =>
+      toPlannedTasks(unit, 1, {
+        subject: "math",
+        dailyFormat: params.dailyFormat,
+        override: params.override,
+        masteryByUnitId: params.masteryByUnitId,
+      }),
+    );
+  }
+
+  const enabledUnits = params.units.filter((u) => u.enabled);
+  const selectedUnits = weightedSampleWithoutReplacement(
+    enabledUnits,
+    (u) => unitWeight(u, params.masteryByUnitId),
+    params.count,
+  );
+
+  if (params.dailyFormat !== "single_large" && params.difficultyDistribution) {
+    const difficulties = expandAndShuffleDifficulties(params.difficultyDistribution, params.count);
+    return selectedUnits.map(
+      (unit, i) =>
+        toPlannedTasks(
+          unit,
+          1,
+          {
+            subject: "math",
+            dailyFormat: params.dailyFormat,
+            override: params.override,
+            masteryByUnitId: params.masteryByUnitId,
+          },
+          1,
+          difficulties[i],
+        )[0],
     );
   }
 
@@ -225,6 +278,7 @@ export function planDailyTasks(params: {
   override: GenerationOverrideRow | null;
   units: CurriculumUnitRow[];
   masteryRows: MasteryRow[];
+  difficultyDistribution?: DifficultyDistribution | null;
 }): PlannedTask[] {
   const masteryByUnitId = new Map(params.masteryRows.map((m) => [m.unit_id, m]));
 
@@ -243,5 +297,6 @@ export function planDailyTasks(params: {
     override: params.override,
     units: params.units,
     masteryByUnitId,
+    difficultyDistribution: params.difficultyDistribution ?? null,
   });
 }

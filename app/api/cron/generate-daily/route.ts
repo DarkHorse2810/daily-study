@@ -85,7 +85,7 @@ async function generateForSubject(admin: AdminClient, subject: Subject, today: s
 
     const { data: settings } = await admin
       .from("subject_settings")
-      .select("daily_format, problems_per_day, enabled")
+      .select("daily_format, problems_per_day, enabled, difficulty_distribution")
       .eq("subject", subject)
       .single();
 
@@ -126,6 +126,7 @@ async function generateForSubject(admin: AdminClient, subject: Subject, today: s
       override,
       units,
       masteryRows,
+      difficultyDistribution: settings.difficulty_distribution,
     });
 
     // 1件ずつ生成する（数学は最大5件）。途中の1件がレート制限等で失敗しても

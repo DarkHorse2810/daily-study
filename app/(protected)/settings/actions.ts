@@ -54,6 +54,70 @@ export async function updateMathUnitSettings(formData: FormData): Promise<void> 
   redirect("/settings?saved=1");
 }
 
+const DIFFICULTY_LEVELS = [1, 2, 3, 4, 5] as const;
+
+/**
+ * 数学の難易度ごとの出題数を手動指定する。「自動」が選ばれた場合はdifficulty_distributionを
+ * nullに戻し、従来通り習熟度に応じた自動調整に戻す。
+ */
+export async function updateMathDifficultySettings(formData: FormData): Promise<void> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    redirect("/login");
+  }
+
+  const admin = createAdminClient();
+
+  if (formData.get("auto") === "on") {
+    const { error } = await admin
+      .from("subject_settings")
+      .update({ difficulty_distribution: null })
+      .eq("subject", "math");
+    if (error) {
+      throw new Error(`設定の保存に失敗しました: ${error.message}`);
+    }
+    revalidatePath("/settings");
+    redirect("/settings?saved=1");
+  }
+
+  const { data: settings, error: settingsError } = await admin
+    .from("subject_settings")
+    .select("problems_per_day")
+    .eq("subject", "math")
+    .single();
+  if (settingsError || !settings) {
+    throw new Error(`設定の取得に失敗しました: ${settingsError?.message}`);
+  }
+
+  const distribution: Record<string, number> = {};
+  let total = 0;
+  for (const level of DIFFICULTY_LEVELS) {
+    const count = Math.max(0, Math.floor(Number(formData.get(`difficulty_${level}`)) || 0));
+    distribution[String(level)] = count;
+    total += count;
+  }
+
+  if (total !== settings.problems_per_day) {
+    throw new Error(
+      `難易度ごとの問題数の合計は${settings.problems_per_day}問にしてください（現在の合計: ${total}問）`,
+    );
+  }
+
+  const { error } = await admin
+    .from("subject_settings")
+    .update({ difficulty_distribution: distribution })
+    .eq("subject", "math");
+  if (error) {
+    throw new Error(`設定の保存に失敗しました: ${error.message}`);
+  }
+
+  revalidatePath("/settings");
+  redirect("/settings?saved=1");
+}
+
 interface PushSubscriptionInput {
   endpoint: string;
   keys: { p256dh: string; auth: string };

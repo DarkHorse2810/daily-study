@@ -44,6 +44,11 @@ export function buildProblemGenerationPrompt(params: {
 - 既存の入試問題の丸写しは避け、オリジナルの問題を作成してください`;
   }
 
+  const arithmeticGuideline =
+    params.subject === "math"
+      ? "\n- 計算量は共通テストで出題される程度を上限の目安にしてください。4桁以上の掛け算・割り算、繁雑な分数の通分、汚い小数が続く計算など、電卓なしでは非現実的な計算量は避けてください。難易度4〜5でも、計算の煩雑さではなく発想力・記述力の高さで差をつけてください"
+      : "";
+
   return `あなたは日本の高校生向け${subjectLabel}指導のプロフェッショナルです。
 以下の条件でオリジナルの問題を1問作成してください。
 
@@ -53,7 +58,7 @@ export function buildProblemGenerationPrompt(params: {
 - 数式はLaTeX記法（$...$）で記述してください
 - 模範解答と、途中式・考え方を含む詳細な解説を用意してください
 - 難易度4〜5の場合は、旧帝国大学（東京大学・京都大学・大阪大学等）の入試問題として通用する水準の、オリジナルかつ正確な問題にしてください
-- 既存の入試問題の丸写しは避け、オリジナルの問題を作成してください`;
+- 既存の入試問題の丸写しは避け、オリジナルの問題を作成してください${arithmeticGuideline}`;
 }
 
 export function buildGradingPrompt(params: {
