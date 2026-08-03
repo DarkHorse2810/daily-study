@@ -39,7 +39,7 @@ export async function transcribeAnswerImage(
         model,
         input: [
           {
-            role: "user",
+            type: "user_input",
             content: [
               { type: "text", text: TRANSCRIBE_PROMPT },
               { type: "image", data: params.base64, mime_type: params.mimeType },
