@@ -11,6 +11,7 @@ export interface CurriculumUnitRow {
   id: string;
   code: string;
   name_ja: string;
+  enabled: boolean;
 }
 
 export interface MasteryRow {
@@ -138,6 +139,8 @@ function toPlannedTasks(
 /**
  * 数学: subject_settings.problems_per_day（またはsingle_largeなら1）件を、
  * overrideがあれば全件同じ単元、無ければ弱点重み付けで単元ごとに1件ずつ選ぶ。
+ * 弱点重み付け抽選の対象は設定画面でenabled=trueにした単元のみに絞る
+ * （override指定はこのフラグに関係なく機能させるため、override解決には全単元を使う）。
  */
 function planMathTasks(params: {
   dailyFormat: DailyFormat;
@@ -151,8 +154,9 @@ function planMathTasks(params: {
     const overrideUnit = findOverrideUnit(params.units, params.override);
     selectedUnits = Array.from({ length: params.count }, () => overrideUnit);
   } else {
+    const enabledUnits = params.units.filter((u) => u.enabled);
     selectedUnits = weightedSampleWithoutReplacement(
-      params.units,
+      enabledUnits,
       (u) => unitWeight(u, params.masteryByUnitId),
       params.count,
     );

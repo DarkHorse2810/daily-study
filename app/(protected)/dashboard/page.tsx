@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { formatInTimeZone } from "date-fns-tz";
 import { startOfMonth, endOfMonth, format } from "date-fns";
 import { createClient } from "@/lib/supabase/server";
@@ -68,6 +69,10 @@ export default async function DashboardPage({
       </p>
 
       <CalendarMonth monthStr={monthStr} todayStr={today} datesWithTasks={datesWithTasks} />
+
+      <Link href="/settings" className="mt-6 block text-sm text-blue-600 underline">
+        設定
+      </Link>
     </main>
   );
 }

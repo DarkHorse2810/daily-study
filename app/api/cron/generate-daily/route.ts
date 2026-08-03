@@ -86,7 +86,7 @@ async function generateForSubject(admin: AdminClient, subject: Subject, today: s
 
     const { data: unitsData } = await admin
       .from("curriculum_units")
-      .select("id, code, name_ja")
+      .select("id, code, name_ja, enabled")
       .eq("subject", subject);
     const units: CurriculumUnitRow[] = unitsData ?? [];
 
