@@ -41,10 +41,11 @@ export async function GET(request: Request) {
   const admin = createAdminClient();
   const today = formatInTimeZone(new Date(), APP_TIMEZONE, "yyyy-MM-dd");
 
-  const results: Record<string, unknown> = {};
-  for (const subject of SUBJECTS) {
-    results[subject] = await generateForSubject(admin, subject, today);
-  }
+  // 教科ごとに独立しているため並列実行する（片方が遅くてももう片方を待たせない）。
+  const resultsBySubject = await Promise.all(
+    SUBJECTS.map(async (subject) => [subject, await generateForSubject(admin, subject, today)] as const),
+  );
+  const results = Object.fromEntries(resultsBySubject);
 
   // 冪等性チェックによりスキップされた場合はgeneratedが付かないため、
   // 実際にその日初めて生成できたときだけ通知する（再実行での重複通知を防ぐ）。
@@ -129,12 +130,11 @@ async function generateForSubject(admin: AdminClient, subject: Subject, today: s
       difficultyDistribution: settings.difficulty_distribution,
     });
 
-    // 1件ずつ生成する（数学は最大5件）。途中の1件がレート制限等で失敗しても
-    // 残りは続行し、生成できた分だけ保存する。
-    let generatedCount = 0;
-    let lastError: string | null = null;
-    for (const planned of plannedTasks) {
-      try {
+    // 全件並列で生成する（数学は最大5件）。順番に生成すると数学5件+英語ドリルの合計時間が
+    // Vercelの実行時間上限を超えてタイムアウトすることがあったため並列化した。
+    // 1件の失敗が他に影響しないようPromise.allSettledを使い、生成できた分だけ保存する。
+    const settled = await Promise.allSettled(
+      plannedTasks.map(async (planned) => {
         const problem = await generateProblem({
           subject,
           unitNameJa: planned.unitNameJa,
@@ -165,10 +165,17 @@ async function generateForSubject(admin: AdminClient, subject: Subject, today: s
         if (insertError) {
           throw new Error(`daily_tasks insert failed: ${insertError.message}`);
         }
+      }),
+    );
+
+    let generatedCount = 0;
+    let lastError: string | null = null;
+    for (const [i, result] of settled.entries()) {
+      if (result.status === "fulfilled") {
         generatedCount++;
-      } catch (itemError) {
-        lastError = itemError instanceof Error ? itemError.message : String(itemError);
-        console.error(`generateProblem failed for unit ${planned.unitId}`, itemError);
+      } else {
+        lastError = result.reason instanceof Error ? result.reason.message : String(result.reason);
+        console.error(`generateProblem failed for unit ${plannedTasks[i].unitId}`, result.reason);
       }
     }
 
