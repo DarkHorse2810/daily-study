@@ -8,6 +8,7 @@ import {
   addMonths,
   subMonths,
 } from "date-fns";
+import type { MonthDayStatus } from "@/lib/study/dayView";
 
 const WEEKDAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 
@@ -20,7 +21,7 @@ export function CalendarMonth({
   monthStr: string;
   /** "yyyy-MM-dd" */
   todayStr: string;
-  datesWithTasks: Set<string>;
+  datesWithTasks: Map<string, MonthDayStatus>;
 }) {
   const monthStart = startOfMonth(new Date(`${monthStr}-01T00:00:00`));
   const monthEnd = endOfMonth(monthStart);
@@ -52,7 +53,9 @@ export function CalendarMonth({
         ))}
         {days.map((day) => {
           const dateStr = format(day, "yyyy-MM-dd");
-          const hasTasks = datesWithTasks.has(dateStr);
+          const dayStatus = datesWithTasks.get(dateStr);
+          const hasTasks = dayStatus?.hasTasks ?? false;
+          const isCleared = dayStatus?.cleared ?? false;
           const isToday = dateStr === todayStr;
           const isFuture = dateStr > todayStr;
 
@@ -64,17 +67,27 @@ export function CalendarMonth({
             );
           }
 
+          const bgClass = isCleared
+            ? "bg-green-100 text-green-800"
+            : isToday
+              ? "bg-blue-100 text-gray-900"
+              : hasTasks
+                ? "text-gray-900"
+                : "text-gray-400";
+
           return (
             <Link
               key={dateStr}
               href={`/history/${dateStr}`}
-              className={`rounded py-2 hover:bg-blue-50 ${
-                isToday ? "bg-blue-100 font-semibold" : ""
-              } ${hasTasks ? "text-gray-900" : "text-gray-400"}`}
+              className={`rounded py-2 hover:bg-blue-50 ${bgClass} ${isToday ? "font-semibold" : ""}`}
             >
               <span>{day.getDate()}</span>
               {hasTasks && (
-                <span className="mx-auto mt-0.5 block h-1 w-1 rounded-full bg-blue-500" />
+                <span
+                  className={`mx-auto mt-0.5 block h-1 w-1 rounded-full ${
+                    isCleared ? "bg-green-500" : "bg-blue-500"
+                  }`}
+                />
               )}
             </Link>
           );

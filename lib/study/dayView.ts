@@ -70,17 +70,48 @@ export async function getTasksForDate(
   });
 }
 
-/** 指定月（yyyy-MM-dd の範囲）にdaily_tasksが存在する日付の集合を返す（カレンダーの印付け用）。 */
+export interface MonthDayStatus {
+  hasTasks: boolean;
+  /** その日の課題が全て提出済みか（採点完了までは待たない）。 */
+  cleared: boolean;
+}
+
+/**
+ * 指定月（yyyy-MM-dd の範囲）の各日について、daily_tasksの有無と全問提出済みかどうかを返す
+ * （カレンダーの印付け・色分け用）。
+ */
 export async function getDatesWithTasks(
   supabase: SupabaseClient,
   startDate: string,
   endDate: string,
-): Promise<Set<string>> {
-  const { data } = await supabase
+): Promise<Map<string, MonthDayStatus>> {
+  const { data: tasksData } = await supabase
     .from("daily_tasks")
-    .select("task_date")
+    .select("id, task_date")
     .gte("task_date", startDate)
     .lte("task_date", endDate);
-  const rows = (data ?? []) as unknown as { task_date: string }[];
-  return new Set(rows.map((r) => r.task_date));
+  const tasks = (tasksData ?? []) as unknown as { id: string; task_date: string }[];
+
+  const taskIds = tasks.map((t) => t.id);
+  const { data: submissionsData } =
+    taskIds.length > 0
+      ? await supabase.from("submissions").select("task_id").in("task_id", taskIds)
+      : { data: [] };
+  const submittedTaskIds = new Set(
+    ((submissionsData ?? []) as { task_id: string }[]).map((s) => s.task_id),
+  );
+
+  const counts = new Map<string, { total: number; submitted: number }>();
+  for (const task of tasks) {
+    const entry = counts.get(task.task_date) ?? { total: 0, submitted: 0 };
+    entry.total += 1;
+    if (submittedTaskIds.has(task.id)) entry.submitted += 1;
+    counts.set(task.task_date, entry);
+  }
+
+  const result = new Map<string, MonthDayStatus>();
+  for (const [date, { total, submitted }] of counts) {
+    result.set(date, { hasTasks: total > 0, cleared: total > 0 && submitted === total });
+  }
+  return result;
 }

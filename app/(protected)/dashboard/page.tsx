@@ -52,7 +52,14 @@ export default async function DashboardPage({
           本日の課題はまだ生成されていません。毎朝6時（JST）に自動生成されます。
         </p>
       ) : (
-        <TaskList tasks={tasks} />
+        <>
+          {tasks.every((t) => t.status !== "unanswered") && (
+            <p className="mt-6 rounded border border-green-200 bg-green-50 px-4 py-3 font-medium text-green-800">
+              🎉 今日の課題をクリアしました！
+            </p>
+          )}
+          <TaskList tasks={tasks} />
+        </>
       )}
 
       <p className="mt-8 text-sm text-gray-500">
