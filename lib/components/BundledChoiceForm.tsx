@@ -83,7 +83,7 @@ export function BundledChoiceForm({
       <button
         type="submit"
         disabled={!allAnswered}
-        className="rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+        className="rounded bg-blue-600 px-4 py-2 text-white transition-colors hover:bg-blue-700 active:bg-blue-900 disabled:cursor-not-allowed disabled:opacity-50"
       >
         {allAnswered ? "提出する" : `あと${subItems.length - Object.keys(selected).length}問`}
       </button>
