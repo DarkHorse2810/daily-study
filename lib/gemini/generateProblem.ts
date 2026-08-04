@@ -32,13 +32,15 @@ const GENERATE_TIMEOUT_MS = 45_000;
  */
 const SELF_CORRECTION_MARKERS = [
   "あれ？",
-  "あれ、これ",
+  "あれ、",
   "もう一度確認",
   "もう一度見直",
+  "もう一度、",
   "訂正します",
   "訂正する",
   "見直します",
   "見直そう",
+  "見直す",
   "ちょっと待って",
   "待てよ",
   "失礼、",
@@ -49,16 +51,37 @@ const SELF_CORRECTION_MARKERS = [
   "修正版",
   "書き直す",
   "書き直そう",
+  "汚い",
+  "中途半端",
+  "確定した問題",
+  "確定する",
+  "調整版",
+  "問題文の再掲",
+  "試行錯誤",
 ];
 
-function hasSelfCorrectionArtifacts(problem: Problem): boolean {
+// キーワード一致だけでは、別解の模索や問題設定の作り直しをすり抜けることがある
+// （実例: 数値を何度も変えながら最終的に落ち着いた設定を採用したケースで、
+// model_answerとsolution_stepsの結論が食い違ったまま検出をすり抜けた）。
+// 正常な解説は概ねこの文字数に収まるため、長すぎる場合も試行錯誤の混入を疑い再生成する。
+const SOLUTION_STEPS_LENGTH_LIMIT = 1200;
+
+function hasSelfCorrectionArtifacts(problem: Problem, questionCount: number): boolean {
   const combined = [
     problem.problem_statement,
     problem.model_answer,
     problem.solution_steps,
     ...(problem.sub_items?.map((s) => s.question_text) ?? []),
   ].join("\n");
-  return SELF_CORRECTION_MARKERS.some((marker) => combined.includes(marker));
+  if (SELF_CORRECTION_MARKERS.some((marker) => combined.includes(marker))) {
+    return true;
+  }
+  // 単語・文法ドリル等（questionCount>1）はsolution_stepsが小問数ぶん長くなって当然なので、
+  // 長さチェックは1問だけの通常課題に限定する。
+  if (questionCount > 1) {
+    return false;
+  }
+  return problem.solution_steps.length > SOLUTION_STEPS_LENGTH_LIMIT;
 }
 
 async function requestProblem(
@@ -97,8 +120,10 @@ export async function generateProblem(params: GenerateProblemParams): Promise<Ge
   const model = params.difficulty >= 4 ? GEMINI_MODEL_STRONG : GEMINI_MODEL_FAST;
   const client = getGeminiClient();
 
+  const questionCount = params.questionCount ?? 1;
+
   const first = await requestProblem(params, model, client);
-  if (!hasSelfCorrectionArtifacts(first)) {
+  if (!hasSelfCorrectionArtifacts(first, questionCount)) {
     return { ...first, generationModel: model };
   }
 
@@ -107,7 +132,7 @@ export async function generateProblem(params: GenerateProblemParams): Promise<Ge
     difficulty: params.difficulty,
   });
   const retry = await requestProblem(params, model, client);
-  if (hasSelfCorrectionArtifacts(retry)) {
+  if (hasSelfCorrectionArtifacts(retry, questionCount)) {
     throw new Error("生成結果に試行錯誤の混入が検出されたため中止しました（再生成後も改善せず）");
   }
   return { ...retry, generationModel: model };
