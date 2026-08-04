@@ -24,11 +24,48 @@ export type GeneratedProblem = Problem & { generationModel: string };
 // 並列実行かつVercelの60秒上限にまだ余裕があることを踏まえて45秒に緩和した。
 const GENERATE_TIMEOUT_MS = 45_000;
 
-/** 難易度4〜5は推論力の高いGEMINI_MODEL_STRONG、それ以外はGEMINI_MODEL_FASTを使う。 */
-export async function generateProblem(params: GenerateProblemParams): Promise<GeneratedProblem> {
-  const model = params.difficulty >= 4 ? GEMINI_MODEL_STRONG : GEMINI_MODEL_FAST;
-  const client = getGeminiClient();
+/**
+ * プロンプトで「試行錯誤を出力に含めない」よう指示しても、モデルが無視して
+ * 「あれ？」等の迷い・自己修正の過程をそのまま出力し、model_answerとsolution_stepsが
+ * 矛盾したまま返ってくることがある。プロンプトだけでは防げないため、
+ * 生成結果にこれらの兆候がないか検証し、あれば1回だけ再生成する。
+ */
+const SELF_CORRECTION_MARKERS = [
+  "あれ？",
+  "あれ、これ",
+  "もう一度確認",
+  "もう一度見直",
+  "訂正します",
+  "訂正する",
+  "見直します",
+  "見直そう",
+  "ちょっと待って",
+  "待てよ",
+  "失礼、",
+  "失礼しました",
+  "再設計",
+  "再度検討",
+  "修正しよう",
+  "修正版",
+  "書き直す",
+  "書き直そう",
+];
 
+function hasSelfCorrectionArtifacts(problem: Problem): boolean {
+  const combined = [
+    problem.problem_statement,
+    problem.model_answer,
+    problem.solution_steps,
+    ...(problem.sub_items?.map((s) => s.question_text) ?? []),
+  ].join("\n");
+  return SELF_CORRECTION_MARKERS.some((marker) => combined.includes(marker));
+}
+
+async function requestProblem(
+  params: GenerateProblemParams,
+  model: string,
+  client: ReturnType<typeof getGeminiClient>,
+): Promise<Problem> {
   const rawText = await callWithLogging(
     { model, purpose: "generate_problem" },
     async () => {
@@ -52,6 +89,26 @@ export async function generateProblem(params: GenerateProblemParams): Promise<Ge
     },
   );
 
-  const problem = ProblemSchema.parse(JSON.parse(rawText));
-  return { ...problem, generationModel: model };
+  return ProblemSchema.parse(JSON.parse(rawText));
+}
+
+/** 難易度4〜5は推論力の高いGEMINI_MODEL_STRONG、それ以外はGEMINI_MODEL_FASTを使う。 */
+export async function generateProblem(params: GenerateProblemParams): Promise<GeneratedProblem> {
+  const model = params.difficulty >= 4 ? GEMINI_MODEL_STRONG : GEMINI_MODEL_FAST;
+  const client = getGeminiClient();
+
+  const first = await requestProblem(params, model, client);
+  if (!hasSelfCorrectionArtifacts(first)) {
+    return { ...first, generationModel: model };
+  }
+
+  console.warn("generateProblem: self-correction artifacts detected, retrying once", {
+    unitNameJa: params.unitNameJa,
+    difficulty: params.difficulty,
+  });
+  const retry = await requestProblem(params, model, client);
+  if (hasSelfCorrectionArtifacts(retry)) {
+    throw new Error("生成結果に試行錯誤の混入が検出されたため中止しました（再生成後も改善せず）");
+  }
+  return { ...retry, generationModel: model };
 }
