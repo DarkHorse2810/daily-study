@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { formatInTimeZone } from "date-fns-tz";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -107,9 +108,6 @@ export async function submitAnswer(taskId: string, formData: FormData): Promise<
   const photo = formData.get("photo");
   const hasPhoto = photo instanceof File && photo.size > 0;
 
-  let answerText: string;
-  let photoReview: Review | null = null;
-
   if (hasPhoto) {
     if ((photo as File).size > MAX_PHOTO_BYTES) {
       throw new Error("写真のサイズが大きすぎます（10MBまで）");
@@ -119,23 +117,49 @@ export async function submitAnswer(taskId: string, formData: FormData): Promise<
     const mimeType = (photo as File).type || "image/jpeg";
 
     // 写真提出は「文字起こし→添削」を1回のGemini呼び出しでまとめて行う
-    // （2回に分けると時間がかかりすぎるため）。ここで失敗した場合は解答自体が
-    // 提出できないため、そのままエラーを投げてerror.tsxで再試行を促す。
-    photoReview = await gradeSubmission({
+    // （2回に分けると時間がかかりすぎるため）。写真の内容（＝解答テキスト）は
+    // この呼び出しの結果でしか分からないため、テキスト提出と違って提出自体を
+    // 先に確定させることができず、完了を待ってからsubmissionを作る。
+    // ここで失敗した場合は解答自体が提出できないため、そのままエラーを投げて
+    // error.tsxで再試行を促す（未提出のまま、写真を撮り直して再提出できる）。
+    const photoReview = await gradeSubmission({
       subject: task.subject,
       problemStatement: task.problem_statement,
       modelAnswer: task.model_answer,
       studentAnswerImage: { base64, mimeType },
     });
-    answerText = photoReview.transcribed_answer?.trim() || "";
+    const answerText = photoReview.transcribed_answer?.trim() || "";
     if (!answerText) {
       throw new Error("写真から解答を読み取れませんでした。文字がはっきり写るように撮り直してください。");
     }
-  } else {
-    answerText = String(formData.get("answer") ?? "").trim();
-    if (!answerText) {
-      throw new Error("解答を入力するか、写真を選択してください");
+
+    const { data: submission, error: submissionError } = await supabase
+      .from("submissions")
+      .insert({ task_id: taskId, user_id: user.id, answer_text: answerText })
+      .select("id")
+      .single();
+    if (submissionError || !submission) {
+      throw new Error(`解答の提出に失敗しました: ${submissionError?.message}`);
     }
+
+    try {
+      await persistReview({
+        submissionId: submission.id,
+        userId: user.id,
+        unitId: task.unit_id,
+        review: photoReview,
+      });
+    } catch (err) {
+      console.error("grading failed after submission", err);
+    }
+
+    revalidatePath(`/tasks/${taskId}`);
+    redirect(`/tasks/${taskId}`);
+  }
+
+  const answerText = String(formData.get("answer") ?? "").trim();
+  if (!answerText) {
+    throw new Error("解答を入力するか、写真を選択してください");
   }
 
   const { data: submission, error: submissionError } = await supabase
@@ -147,29 +171,27 @@ export async function submitAnswer(taskId: string, formData: FormData): Promise<
     throw new Error(`解答の提出に失敗しました: ${submissionError?.message}`);
   }
 
-  try {
-    if (photoReview) {
-      await persistReview({
-        submissionId: submission.id,
-        userId: user.id,
-        unitId: task.unit_id,
-        review: photoReview,
-      });
-    } else {
+  // テキスト提出は採点（Gemini呼び出し）の完了を待たずに画面遷移し、
+  // 「採点中」表示にする。採点自体はレスポンス送信後もafter()で継続する。
+  const submissionId = submission.id;
+  const userId = user.id;
+  const { subject, unit_id: unitId, problem_statement: problemStatement, model_answer: modelAnswer, sub_items: subItems } = task;
+  after(async () => {
+    try {
       await gradeAndScore({
-        submissionId: submission.id,
-        userId: user.id,
-        subject: task.subject,
-        unitId: task.unit_id,
-        problemStatement: task.problem_statement,
-        modelAnswer: task.model_answer,
+        submissionId,
+        userId,
+        subject,
+        unitId,
+        problemStatement,
+        modelAnswer,
         studentAnswer: answerText,
-        subItems: task.sub_items,
+        subItems,
       });
+    } catch (err) {
+      console.error("background grading failed", err);
     }
-  } catch (err) {
-    console.error("grading failed after submission", err);
-  }
+  });
 
   revalidatePath(`/tasks/${taskId}`);
   redirect(`/tasks/${taskId}`);
@@ -196,20 +218,22 @@ export async function retryGrading(submissionId: string): Promise<void> {
     throw new Error("紐づく課題が見つかりません");
   }
 
-  try {
-    await gradeAndScore({
-      submissionId: submissionData.id,
-      userId: submissionData.user_id,
-      subject: task.subject,
-      unitId: task.unit_id,
-      problemStatement: task.problem_statement,
-      modelAnswer: task.model_answer,
-      studentAnswer: submissionData.answer_text,
-      subItems: task.sub_items,
-    });
-  } catch (err) {
-    console.error("retry grading failed", err);
-  }
+  after(async () => {
+    try {
+      await gradeAndScore({
+        submissionId: submissionData.id,
+        userId: submissionData.user_id,
+        subject: task.subject,
+        unitId: task.unit_id,
+        problemStatement: task.problem_statement,
+        modelAnswer: task.model_answer,
+        studentAnswer: submissionData.answer_text,
+        subItems: task.sub_items,
+      });
+    } catch (err) {
+      console.error("retry grading failed", err);
+    }
+  });
 
   revalidatePath(`/tasks/${submissionData.task_id}`);
   redirect(`/tasks/${submissionData.task_id}`);
