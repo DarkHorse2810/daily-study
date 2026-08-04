@@ -34,7 +34,7 @@ export function buildProblemGenerationPrompt(params: {
   - choices: 4つの選択肢のテキストのみの配列（①②③④等の記号は付けないでください。UI側で自動的に番号を付けます）
 - choicesフィールド（トップレベル）は使わないでください
 - model_answer には、各小問の正解を「1. ②」のように番号と選択肢の番号（①〜④）で全てまとめて記載してください
-- solution_steps には、各小問の解説を番号に対応させて全てまとめて記載してください
+- solution_steps には、各小問について番号に対応させ、なぜその選択肢が正解なのか（単語・熟語の意味、文法的な理由、文脈上の根拠など）を1問ずつ具体的に説明してください。「1. ②が正解。〜という意味/用法のため」のように、正解の根拠を毎回明記し、「同様に」「以下略」等で省略しないでください
 - estimated_minutes は${questionCount}問全体にかかる目安時間にしてください
 - 既存の入試問題の丸写しは避け、オリジナルの問題を作成してください${OUTPUT_QUALITY_GUIDELINE}`;
   }
@@ -71,19 +71,41 @@ export function buildProblemGenerationPrompt(params: {
 - 既存の入試問題の丸写しは避け、オリジナルの問題を作成してください${arithmeticGuideline}${OUTPUT_QUALITY_GUIDELINE}`;
 }
 
+export interface GradingSubItem {
+  number: number;
+  question_text: string;
+  choices: string[];
+}
+
+function formatSubItemsForPrompt(subItems: GradingSubItem[]): string {
+  return subItems
+    .map((item) => {
+      const choicesText = item.choices
+        .map((choice, i) => `${["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨"][i] ?? i + 1}${choice}`)
+        .join(" ");
+      return `${item.number}. ${item.question_text}\n   選択肢: ${choicesText}`;
+    })
+    .join("\n");
+}
+
 export function buildGradingPrompt(params: {
   subject: Subject;
   problemStatement: string;
   modelAnswer: string;
   studentAnswer: string;
+  subItems?: GradingSubItem[] | null;
 }): string {
   const subjectLabel = params.subject === "math" ? "数学" : "英語";
+  const subItemsSection =
+    params.subItems && params.subItems.length > 0
+      ? `\n\n# 各小問の内容\n${formatSubItemsForPrompt(params.subItems)}`
+      : "";
 
   return `あなたは日本の高校生向け${subjectLabel}指導のプロフェッショナルです。
 以下の問題・模範解答・生徒の解答をもとに、詳細な添削を行ってください。
 
 # 問題
-${params.problemStatement}
+${params.problemStatement}${subItemsSection}
 
 # 模範解答
 ${params.modelAnswer}
@@ -92,7 +114,8 @@ ${params.modelAnswer}
 ${params.studentAnswer}
 
 正誤判定・得点（0〜100）・具体的で建設的な日本語のフィードバック・良かった点・改善点・（必要であれば）修正した解答例を作成してください。
-部分点の考慮など、実際の入試採点に近い基準で評価してください。`;
+部分点の考慮など、実際の入試採点に近い基準で評価してください。
+複数の小問がある場合は、feedbackの中で1問ずつ正誤とその理由（単語・熟語の意味、文法的根拠など）に触れ、「同様に」「以下略」等で説明を省略しないでください。`;
 }
 
 /**

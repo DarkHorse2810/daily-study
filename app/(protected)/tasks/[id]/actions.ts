@@ -9,6 +9,7 @@ import { gradeSubmission } from "@/lib/gemini/gradeSubmission";
 import { applyMasteryUpdate } from "@/lib/study/mastery";
 import { APP_TIMEZONE, GEMINI_MODEL_STRONG } from "@/lib/config";
 import type { Review } from "@/lib/gemini/schemas/review";
+import type { GradingSubItem } from "@/lib/gemini/prompts/systemPrompts";
 import type { Subject } from "@/lib/curriculum";
 
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024; // 10MB
@@ -49,6 +50,7 @@ interface GradeAndScoreParams {
   problemStatement: string;
   modelAnswer: string;
   studentAnswer: string;
+  subItems?: GradingSubItem[] | null;
 }
 
 /** テキスト解答を添削し、reviews/user_topic_masteryへ反映する（Gemini呼び出しを1回行う）。 */
@@ -58,6 +60,7 @@ async function gradeAndScore(params: GradeAndScoreParams): Promise<void> {
     problemStatement: params.problemStatement,
     modelAnswer: params.modelAnswer,
     studentAnswer: params.studentAnswer,
+    subItems: params.subItems,
   });
   await persistReview({
     submissionId: params.submissionId,
@@ -78,7 +81,7 @@ export async function submitAnswer(taskId: string, formData: FormData): Promise<
 
   const { data: task, error: taskError } = await supabase
     .from("daily_tasks")
-    .select("task_date, subject, unit_id, problem_statement, model_answer")
+    .select("task_date, subject, unit_id, problem_statement, model_answer, sub_items")
     .eq("id", taskId)
     .single();
   if (taskError || !task) {
@@ -88,6 +91,17 @@ export async function submitAnswer(taskId: string, formData: FormData): Promise<
   const today = formatInTimeZone(new Date(), APP_TIMEZONE, "yyyy-MM-dd");
   if (task.task_date !== today) {
     throw new Error("この課題は本日分ではないため、解答の受付を終了しています");
+  }
+
+  // 1問1回のみの設計だが、ブラウザの戻る操作やタブの多重操作等で
+  // フォームが表示されたまま複数回submitAnswerが呼ばれるケースがあり得るため、
+  // ここでも既存提出の有無をサーバー側で確認する（DB側もunique制約で二重に防止）。
+  const { count: existingSubmissionCount } = await supabase
+    .from("submissions")
+    .select("id", { count: "exact", head: true })
+    .eq("task_id", taskId);
+  if ((existingSubmissionCount ?? 0) > 0) {
+    throw new Error("この課題は既に提出済みです");
   }
 
   const photo = formData.get("photo");
@@ -150,6 +164,7 @@ export async function submitAnswer(taskId: string, formData: FormData): Promise<
         problemStatement: task.problem_statement,
         modelAnswer: task.model_answer,
         studentAnswer: answerText,
+        subItems: task.sub_items,
       });
     }
   } catch (err) {
@@ -165,7 +180,9 @@ export async function retryGrading(submissionId: string): Promise<void> {
 
   const { data: submissionData, error } = await admin
     .from("submissions")
-    .select("id, task_id, user_id, answer_text, daily_tasks(subject, unit_id, problem_statement, model_answer)")
+    .select(
+      "id, task_id, user_id, answer_text, daily_tasks(subject, unit_id, problem_statement, model_answer, sub_items)",
+    )
     .eq("id", submissionId)
     .single();
   if (error || !submissionData) {
@@ -188,6 +205,7 @@ export async function retryGrading(submissionId: string): Promise<void> {
       problemStatement: task.problem_statement,
       modelAnswer: task.model_answer,
       studentAnswer: submissionData.answer_text,
+      subItems: task.sub_items,
     });
   } catch (err) {
     console.error("retry grading failed", err);
