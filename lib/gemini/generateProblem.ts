@@ -20,7 +20,9 @@ export type GeneratedProblem = Problem & { generationModel: string };
 // cronは複数件を並列生成するため、1件が異常に長く応答しない場合に備えて
 // 個別にタイムアウトを設ける（Vercelの実行時間上限を1件の遅延で使い切らないため）。
 // SDK側の自動リトライも無効化し、遅延の積み重ねを防ぐ。
-const GENERATE_TIMEOUT_MS = 25_000;
+// 25秒では難易度4〜5（GEMINI_MODEL_STRONG）の生成が間に合わないことが多かったため、
+// 並列実行かつVercelの60秒上限にまだ余裕があることを踏まえて45秒に緩和した。
+const GENERATE_TIMEOUT_MS = 45_000;
 
 /** 難易度4〜5は推論力の高いGEMINI_MODEL_STRONG、それ以外はGEMINI_MODEL_FASTを使う。 */
 export async function generateProblem(params: GenerateProblemParams): Promise<GeneratedProblem> {
