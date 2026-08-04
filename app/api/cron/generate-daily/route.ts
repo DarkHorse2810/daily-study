@@ -42,10 +42,23 @@ export async function GET(request: Request) {
   const today = formatInTimeZone(new Date(), APP_TIMEZONE, "yyyy-MM-dd");
 
   // 教科ごとに独立しているため並列実行する（片方が遅くてももう片方を待たせない）。
-  const resultsBySubject = await Promise.all(
+  // allSettledを使うのは、片方の処理が予期せず例外を投げても（例:
+  // generation_runsへの最初の書き込み自体が失敗する等）、Promise.allのように
+  // レスポンス全体を巻き込んで失敗させず、もう片方の結果を確実に返すため。
+  const settledBySubject = await Promise.allSettled(
     SUBJECTS.map(async (subject) => [subject, await generateForSubject(admin, subject, today)] as const),
   );
-  const results = Object.fromEntries(resultsBySubject);
+  const results: Record<string, unknown> = {};
+  for (const [i, settled] of settledBySubject.entries()) {
+    const subject = SUBJECTS[i];
+    if (settled.status === "fulfilled") {
+      results[subject] = settled.value[1];
+    } else {
+      const message = settled.reason instanceof Error ? settled.reason.message : String(settled.reason);
+      console.error(`generateForSubject crashed for ${subject}`, settled.reason);
+      results[subject] = { error: message };
+    }
+  }
 
   // 冪等性チェックによりスキップされた場合はgeneratedが付かないため、
   // 実際にその日初めて生成できたときだけ通知する（再実行での重複通知を防ぐ）。
@@ -65,14 +78,16 @@ export async function GET(request: Request) {
 }
 
 async function generateForSubject(admin: AdminClient, subject: Subject, today: string) {
-  const { data: runRow } = await admin
-    .from("generation_runs")
-    .insert({ run_date: today, subject, status: "pending" })
-    .select("id")
-    .single();
-  const runId = (runRow as { id: string } | null)?.id;
+  let runId: string | undefined;
 
   try {
+    const { data: runRow } = await admin
+      .from("generation_runs")
+      .insert({ run_date: today, subject, status: "pending" })
+      .select("id")
+      .single();
+    runId = (runRow as { id: string } | null)?.id;
+
     const { count: existingCount } = await admin
       .from("daily_tasks")
       .select("id", { count: "exact", head: true })
