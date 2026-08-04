@@ -1,5 +1,15 @@
 import { DIFFICULTY_LABELS, type Difficulty, type ProblemType, type Subject } from "@/lib/curriculum";
 
+/**
+ * 生成結果に、モデルの試行錯誤・自己修正の過程（「あれ？」「もう一度確認する」「〜に修正する」等）が
+ * そのまま出力に混入し、LaTeXの閉じ忘れやmodel_answerとsolution_stepsの矛盾（例:
+ * 別解を検討して問題設定を変えたのに元の値のまま答えてしまう）が発生したため追加した指示。
+ */
+const OUTPUT_QUALITY_GUIDELINE = `
+- 出力する前に必ず自分で解き直して検算し、model_answerとsolution_stepsの内容が完全に一致していることを確認してください
+- 「あれ？」「もう一度確認する」「訂正します」「問題を修正する」のような試行錯誤・迷い・自己修正の過程は一切出力に含めず、検証済みの最終的な内容だけを記載してください
+- 数式のLaTeX記法（$...$）は必ず開始と終了の$を対で閉じてください`;
+
 export function buildProblemGenerationPrompt(params: {
   subject: Subject;
   unitNameJa: string;
@@ -26,7 +36,7 @@ export function buildProblemGenerationPrompt(params: {
 - model_answer には、各小問の正解を「1. ②」のように番号と選択肢の番号（①〜④）で全てまとめて記載してください
 - solution_steps には、各小問の解説を番号に対応させて全てまとめて記載してください
 - estimated_minutes は${questionCount}問全体にかかる目安時間にしてください
-- 既存の入試問題の丸写しは避け、オリジナルの問題を作成してください`;
+- 既存の入試問題の丸写しは避け、オリジナルの問題を作成してください${OUTPUT_QUALITY_GUIDELINE}`;
   }
 
   if (questionCount > 1) {
@@ -41,7 +51,7 @@ export function buildProblemGenerationPrompt(params: {
 - solution_steps には、各小問の解説を番号に対応させて全てまとめて記載してください
 - 数式はLaTeX記法（$...$）で記述してください
 - estimated_minutes は${questionCount}問全体にかかる目安時間にしてください
-- 既存の入試問題の丸写しは避け、オリジナルの問題を作成してください`;
+- 既存の入試問題の丸写しは避け、オリジナルの問題を作成してください${OUTPUT_QUALITY_GUIDELINE}`;
   }
 
   const arithmeticGuideline =
@@ -58,7 +68,7 @@ export function buildProblemGenerationPrompt(params: {
 - 数式はLaTeX記法（$...$）で記述してください
 - 模範解答と、途中式・考え方を含む詳細な解説を用意してください
 - 難易度4〜5の場合は、旧帝国大学（東京大学・京都大学・大阪大学等）の入試問題として通用する水準の、オリジナルかつ正確な問題にしてください
-- 既存の入試問題の丸写しは避け、オリジナルの問題を作成してください${arithmeticGuideline}`;
+- 既存の入試問題の丸写しは避け、オリジナルの問題を作成してください${arithmeticGuideline}${OUTPUT_QUALITY_GUIDELINE}`;
 }
 
 export function buildGradingPrompt(params: {
